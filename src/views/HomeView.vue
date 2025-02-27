@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useRecordsStore, type Record } from '@/stores/records'
 import type { InputType, QTableColumn, QTdProps } from 'quasar'
 import { ref, type Ref } from 'vue'
+
+// Types and interfaces
 
 type Rule = (val: string) => string | true
 
@@ -15,19 +18,6 @@ interface SelectProps {
     label: string
   }[]
   rules?: Rule[]
-}
-
-// interface Column extends QTableColumn {
-//   inputProps?: InputProps
-//   selectProps?: SelectProps
-// }
-
-interface Record {
-  id: number
-  tags: string[]
-  type: string
-  login: string
-  password: string | null
 }
 
 interface RowElement {
@@ -54,6 +44,13 @@ interface Row {
   password: RowInputElement
 }
 
+type SelectItem = {
+  value: string
+  label: string
+}
+
+// Validators for inputs
+
 const required = (val: string | SelectItem) => {
   const errorText = 'Это обязательное поле'
 
@@ -68,10 +65,9 @@ const limitedLength = (val: string, length: number) => {
   return val.length <= length || `Максимальное количество символов - ${length}`
 }
 
-type SelectItem = {
-  value: string
-  label: string
-}
+// Constants
+
+const recordsStore = useRecordsStore()
 
 const recordTypes: SelectItem[] = [
   { value: 'ldap', label: 'LDAP' },
@@ -84,34 +80,24 @@ const columns: QTableColumn[] = [
     label: 'Метки',
     field: 'tags',
     align: 'center',
-    // inputProps: {
-    //   type: 'text',
-    //   rules: [(val) => limitedLength(val, 50)],
-    // },
   },
   {
     name: 'type',
     label: 'Тип записи',
     field: 'type',
     align: 'center',
-    // selectProps: {
-    //   items: recordTypes,
-    //   rules: [required],
-    // },
   },
   {
     name: 'login',
     label: 'Логин',
     field: 'login',
     align: 'center',
-    // inputProps: { type: 'text', rules: [required, (val) => limitedLength(val, 100)] },
   },
   {
     name: 'password',
     label: 'Пароль',
     field: 'password',
     align: 'center',
-    // inputProps: { type: 'password', rules: [required, (val) => limitedLength(val, 100)] },
   },
   {
     name: 'deletable',
@@ -121,33 +107,28 @@ const columns: QTableColumn[] = [
   },
 ]
 
-const initialRecords: Ref<Record[]> = ref([
-  {
-    id: 1,
-    tags: ['XXX'],
-    type: 'ldap',
-    login: '',
-    password: '',
-  },
-  {
-    id: 2,
-    tags: ['XXX; YYYYYYYYY;'],
-    type: 'local',
-    login: 'Значение',
-    password: '',
-  },
-  {
-    id: 3,
-    tags: [],
-    type: '',
-    login: 'Значение',
-    password: 'Значение',
-  },
-])
+const rows: Ref<Row[]> = ref(
+  recordsStore.records.map((record) => {
+    return constructRow(record)
+  }),
+)
 
-function constructRow(record: Record | undefined, id: number = 0): Row {
+const isLoading = ref(false)
+const showHint = ref(true)
+
+// Functions
+
+function unpackTags(tagsArray: Record['tags']) {
+  if (!Array.isArray(tagsArray) || !tagsArray) {
+    return ''
+  }
+  return tagsArray.map((item) => item.text).join('; ')
+}
+
+function constructRow(record: Record): Row {
+  const tags = unpackTags(record.tags) ?? record.tags
   return {
-    id: record?.id ?? id,
+    id: record?.id ?? 0,
     tags: {
       fieldRef: undefined,
       field: 'input',
@@ -155,7 +136,7 @@ function constructRow(record: Record | undefined, id: number = 0): Row {
         type: 'text',
         rules: [(val) => limitedLength(val, 50)],
       },
-      value: record?.tags ?? '',
+      value: tags,
     },
     type: {
       fieldRef: undefined,
@@ -171,7 +152,7 @@ function constructRow(record: Record | undefined, id: number = 0): Row {
       field: 'input',
       fieldProps: {
         type: 'text',
-        rules: [required],
+        rules: [required, (val) => limitedLength(val, 100)],
       },
       value: record?.login ?? '',
     },
@@ -180,25 +161,17 @@ function constructRow(record: Record | undefined, id: number = 0): Row {
       field: 'input',
       fieldProps: {
         type: 'password',
-        rules: [required],
+        rules: [required, (val) => limitedLength(val, 100)],
       },
       value: record?.password ?? '',
     },
   }
 }
 
-const rows: Ref<Row[]> = ref(
-  initialRecords.value.map((record) => {
-    return constructRow(record)
-  }),
-)
-
-const isLoading = ref(false)
-const showHint = ref(true)
-
 function deleteRow(id: number) {
   const index = rows.value.findIndex((row) => row.id === id)
   if (index !== undefined) {
+    recordsStore.removeRecord(id)
     rows.value = [...rows.value.slice(0, index), ...rows.value.slice(index + 1)]
   }
 }
@@ -209,7 +182,6 @@ function passwordCellHide(props: QTdProps['props']): boolean {
   if (cell && cell.field === 'input' && colName !== 'password') {
     return true
   } else if (colName === 'password' && props.row.type.value !== 'ldap') {
-    props.row.password.value = null
     return true
   }
   return false
@@ -217,9 +189,45 @@ function passwordCellHide(props: QTdProps['props']): boolean {
 
 function addRow() {
   isLoading.value = true
-  const latestId = Math.max(...rows.value.map((obj) => obj.id))
-  rows.value = [...rows.value, constructRow(undefined, latestId + 1)]
+  const latestId = rows.value.length > 0 ? Math.max(...rows.value.map((obj) => obj.id)) + 1 : 0
+  const newRecord = {
+    id: latestId,
+    tags: [],
+    type: '',
+    login: '',
+    password: '',
+  }
+  rows.value = [...rows.value, constructRow(newRecord)]
+  recordsStore.addRecord(newRecord)
   isLoading.value = false
+}
+
+function updateRecord(props: QTdProps['props']) {
+  const id = props.row.id
+  const field = props.col.name
+  let value = props.row[props.col.name].value
+  const fieldRef = props.row[props.col.name].fieldRef
+
+  if (!fieldRef || !fieldRef.validate()) {
+    return
+  }
+
+  if (field === 'tags' && value.length > 0) {
+    value = value
+      .split(';')
+      .map((item: string) => ({ text: item.trim() }))
+      .filter(Boolean)
+  }
+
+  recordsStore.updateRecord(id, {
+    [field]: value,
+  })
+
+  if (field === 'type' && value === 'ldap') {
+    recordsStore.updateRecord(id, {
+      password: null,
+    })
+  }
 }
 </script>
 
@@ -231,7 +239,7 @@ function addRow() {
     table-header-class="text-blue-grey-6"
     class="q-pa-md"
     separator="none"
-    hide-pagination
+    :rows-per-page-options="[50]"
   >
     <template v-slot:top>
       <div class="col q-gutter-y-md">
@@ -264,17 +272,15 @@ function addRow() {
         :props="props"
         v-if="passwordCellHide(props)"
         :colspan="props.col.name === 'login' && props.row.type.value === 'ldap' ? 2 : 1"
-        @click="
-          console.log(props.row[props.col.name] && props.row[props.col.name].field === 'input')
-        "
       >
         <q-input
-          :ref="(el) => (props.row[props.col.name].fieldRef = el)"
+          :ref="(element) => (props.row[props.col.name].fieldRef = element)"
           v-model="props.row[props.col.name].value"
           :type="props.row[props.col.name].fieldProps.type ?? 'text'"
           :rules="props.row[props.col.name].fieldProps.rules ?? undefined"
           dense
           outlined
+          @blur="updateRecord(props)"
         >
           <template v-slot:append v-if="props.col.name === 'password'">
             <q-icon
@@ -297,6 +303,7 @@ function addRow() {
         v-if="props.row[props.col.name] && props.row[props.col.name].field === 'select'"
       >
         <q-select
+          :ref="(element) => (props.row[props.col.name].fieldRef = element)"
           style="min-width: 150px"
           emit-value
           map-options
@@ -305,6 +312,7 @@ function addRow() {
           :options="recordTypes"
           dense
           outlined
+          @update:model-value="updateRecord(props)"
         />
       </q-td>
       <q-td :props="props" v-if="props.col.name === 'deletable'">

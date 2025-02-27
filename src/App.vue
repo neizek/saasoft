@@ -8,9 +8,11 @@ import FooterBar from './components/Layout/FooterBar.vue'
 <template>
   <MainLayout>
     <HeaderBar />
-    <q-page>
-      <RouterView />
-    </q-page>
+    <q-page-container>
+      <q-page class="q-pa-xl">
+        <RouterView />
+      </q-page>
+    </q-page-container>
     <FooterBar />
   </MainLayout>
 </template>
